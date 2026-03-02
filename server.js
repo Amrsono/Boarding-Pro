@@ -12,10 +12,19 @@ const PORT = process.env.PORT || 3000;
 const NEWS_API_KEY = process.env.NEWS_API_KEY || '';
 
 // Initialize Supabase
+let supabase = null;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
-const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
-if (!supabase) console.warn('⚠️ Supabase credentials missing. Lead saving will fail.');
+
+if (supabaseUrl && supabaseKey && !supabaseUrl.includes('your_supabase_url_here')) {
+    try {
+        supabase = createClient(supabaseUrl, supabaseKey);
+    } catch (err) {
+        console.error('❌ Supabase Init Error:', err.message);
+    }
+}
+
+if (!supabase) console.warn('⚠️ Supabase credentials missing or invalid. Lead saving will fail.');
 
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'golden2024';
