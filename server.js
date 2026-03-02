@@ -5,10 +5,17 @@ const cheerio = require('cheerio');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const NEWS_API_KEY = process.env.NEWS_API_KEY || '';
+
+// Initialize Supabase
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+if (!supabase) console.warn('⚠️ Supabase credentials missing. Lead saving will fail.');
 
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'golden2024';
@@ -353,31 +360,27 @@ app.get('/api/news', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Save a new booking
-app.post('/api/bookings', (req, res) => {
+app.post('/api/bookings', async (req, res) => {
     const { name, email, phone, date, project, developer, type } = req.body;
 
     if (!name || !email || !phone || !project) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const bookingPath = path.join(__dirname, 'bookings.json');
-    let bookings = [];
+    if (!supabase) {
+        return res.status(503).json({ error: 'Database not configured' });
+    }
 
     try {
-        if (fs.existsSync(bookingPath)) {
-            bookings = JSON.parse(fs.readFileSync(bookingPath, 'utf8'));
-        }
+        const { data, error } = await supabase
+            .from('bookings')
+            .insert([
+                { name, email, phone, date, project, developer, type }
+            ])
+            .select();
 
-        const newBooking = {
-            id: Date.now(),
-            name, email, phone, date, project, developer, type,
-            timestamp: new Date().toISOString()
-        };
-
-        bookings.push(newBooking);
-        fs.writeFileSync(bookingPath, JSON.stringify(bookings, null, 2));
-
-        res.status(201).json({ message: 'Booking successful', booking: newBooking });
+        if (error) throw error;
+        res.status(201).json({ message: 'Booking successful', booking: data[0] });
     } catch (err) {
         res.status(500).json({ error: 'Failed to save booking', message: err.message });
     }
@@ -395,26 +398,38 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 // Get all bookings
-app.get('/api/admin/bookings', isAdmin, (req, res) => {
-    const bookingPath = path.join(__dirname, 'bookings.json');
+app.get('/api/admin/bookings', isAdmin, async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: 'Database not configured' });
+
     try {
-        const bookings = fs.existsSync(bookingPath) ? JSON.parse(fs.readFileSync(bookingPath, 'utf8')) : [];
-        res.json(bookings);
+        const { data, error } = await supabase
+            .from('bookings')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        res.json(data);
     } catch (err) {
-        res.status(500).json({ error: 'Failed to read bookings' });
+        res.status(500).json({ error: 'Failed to read bookings', message: err.message });
     }
 });
 
 // Export bookings as CSV
-app.get('/api/admin/export', isAdmin, (req, res) => {
-    const bookingPath = path.join(__dirname, 'bookings.json');
-    try {
-        const bookings = fs.existsSync(bookingPath) ? JSON.parse(fs.readFileSync(bookingPath, 'utf8')) : [];
-        if (bookings.length === 0) return res.status(404).send('No bookings to export');
+app.get('/api/admin/export', isAdmin, async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: 'Database not configured' });
 
-        const headers = ['ID', 'Date', 'Project', 'Developer', 'Name', 'Email', 'Phone', 'Visit Date'];
+    try {
+        const { data: bookings, error } = await supabase
+            .from('bookings')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        if (!bookings || bookings.length === 0) return res.status(404).send('No bookings to export');
+
+        const headers = ['ID', 'Timestamp', 'Project', 'Developer', 'Name', 'Email', 'Phone', 'Visit Date'];
         const rows = bookings.map(b => [
-            b.id, b.timestamp, b.project, b.developer, b.name, b.email, b.phone, b.date || 'N/A'
+            b.id, b.created_at || b.timestamp, b.project, b.developer, b.name, b.email, b.phone, b.date || 'N/A'
         ]);
 
         const csvContent = [headers, ...rows].map(r => r.join(',')).join('\n');
@@ -423,7 +438,7 @@ app.get('/api/admin/export', isAdmin, (req, res) => {
         res.setHeader('Content-Disposition', 'attachment; filename=golden_leads_export.csv');
         res.send(csvContent);
     } catch (err) {
-        res.status(500).json({ error: 'Export failed' });
+        res.status(500).json({ error: 'Export failed', message: err.message });
     }
 });
 
@@ -514,15 +529,14 @@ app.get('/api/health', (req, res) => {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// START SERVER
+// START SERVER (Conditional for Vercel)
 // ═══════════════════════════════════════════════════════════════════════════
-app.listen(PORT, () => {
-    console.log(`\n🏠 Golden Boarding Dashboard Server`);
-    console.log(`   ➜ Dashboard:  http://localhost:${PORT}`);
-    console.log(`   ➜ News API:   http://localhost:${PORT}/api/news`);
-    console.log(`   ➜ Stocks API: http://localhost:${PORT}/api/stocks`);
-    console.log(`   ➜ Currency:   http://localhost:${PORT}/api/currency`);
-    console.log(`   ➜ Market:     http://localhost:${PORT}/api/market`);
-    console.log(`   ➜ Health:     http://localhost:${PORT}/api/health`);
-    console.log(`   ➜ NewsAPI:    ${NEWS_API_KEY && NEWS_API_KEY !== 'demo' ? '✅ Key configured' : '⚠️ No key — run with NEWS_API_KEY=your_key'}\n`);
-});
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(`\n🏠 Golden Boarding Dashboard Server`);
+        console.log(`   ➜ Dashboard:  http://localhost:${PORT}`);
+        console.log(`   ➜ API Status: http://localhost:${PORT}/api/health\n`);
+    });
+}
+
+module.exports = app;
