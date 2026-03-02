@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard | GoldenBoarding</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            background: #0f172a;
+            padding: 2rem;
+            min-height: 100vh;
+        }
+
+        .admin-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3rem;
+        }
+
+        .dashboard-card {
+            padding: 2rem;
+            overflow: hidden;
+            border-radius: 16px;
+        }
+
+        .leads-table-container {
+            overflow-x: auto;
+            margin-top: 1.5rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            min-width: 800px;
+        }
+
+        th {
+            background: rgba(15, 23, 42, 0.4);
+            padding: 1rem;
+            color: var(--gold);
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            font-size: 0.95rem;
+            color: var(--text-main);
+        }
+
+        tr:hover td {
+            background: rgba(148, 163, 184, 0.05);
+        }
+
+        .badge {
+            padding: 0.25rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .badge-visit {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        .badge-brochure {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem;
+            color: var(--text-muted);
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="admin-nav reveal">
+        <div class="logo">
+            <span class="gold-text">Golden</span>Admin <span class="subtitle"
+                style="font-size:0.8rem; margin-left:10px;">Leads Management</span>
+        </div>
+        <div class="controls">
+            <a href="index.html" class="cta-button-outline"
+                style="padding: 0.6rem 1.2rem; font-size: 0.9rem; text-decoration: none;">
+                🏠 Main Site
+            </a>
+            <button id="btn-export" class="cta-button pulse-glow" style="padding: 0.6rem 1.2rem; font-size: 0.9rem;">
+                📥 Export to Excel (CSV)
+            </button>
+            <button id="btn-logout" class="cta-button-outline" style="padding: 0.6rem 1.2rem; font-size: 0.9rem;">
+                Logout
+            </button>
+        </div>
+    </header>
+
+    <main class="dashboard-card glass-panel reveal-up">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>Active <span class="gold-text">Leads</span></h3>
+            <span id="lead-count" class="subtitle">0 Total Leads</span>
+        </div>
+
+        <div class="leads-table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Project</th>
+                        <th>Developer</th>
+                        <th>Name</th>
+                        <th>Contact</th>
+                        <th>Type</th>
+                        <th>Visit Date</th>
+                    </tr>
+                </thead>
+                <tbody id="leads-body">
+                    <!-- Dynamic -->
+                </tbody>
+            </table>
+            <div id="no-leads" class="empty-state" style="display: none;">
+                No bookings or requests found yet.
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const token = localStorage.getItem('admin_token');
+        if (!token) window.location.href = 'admin-login.html';
+
+        async function fetchLeads() {
+            try {
+                const resp = await fetch('api/admin/bookings', {
+                    headers: { 'Authorization': token }
+                });
+
+                if (resp.status === 401) {
+                    localStorage.removeItem('admin_token');
+                    window.location.href = 'admin-login.html';
+                    return;
+                }
+
+                const leads = await resp.json();
+                renderLeads(leads);
+            } catch (err) {
+                console.error('Fetch error:', err);
+            }
+        }
+
+        function renderLeads(leads) {
+            const body = document.getElementById('leads-body');
+            const count = document.getElementById('lead-count');
+            const empty = document.getElementById('no-leads');
+
+            count.textContent = `${leads.length} Total Leads`;
+
+            if (leads.length === 0) {
+                empty.style.display = 'block';
+                return;
+            }
+
+            body.innerHTML = leads.reverse().map(l => `
+                <tr>
+                    <td>${new Date(l.timestamp).toLocaleDateString()}</td>
+                    <td style="font-weight:600;">${l.project}</td>
+                    <td>${l.developer}</td>
+                    <td>${l.name}</td>
+                    <td style="font-size:0.85rem;">
+                        <div>${l.email}</div>
+                        <div style="color:var(--text-muted);">${l.phone}</div>
+                    </td>
+                    <td>
+                        <span class="badge ${l.type === 'Scheduled Visit' ? 'badge-visit' : 'badge-brochure'}">
+                            ${l.type}
+                        </span>
+                    </td>
+                    <td>${l.date ? new Date(l.date).toLocaleDateString() : '—'}</td>
+                </tr>
+            `).join('');
+        }
+
+        document.getElementById('btn-logout').addEventListener('click', () => {
+            localStorage.removeItem('admin_token');
+            window.location.href = 'admin-login.html';
+        });
+
+        // Export button logic using fetch and blob to preserve headers
+        document.getElementById('btn-export').addEventListener('click', async (e) => {
+            e.preventDefault();
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            btn.textContent = '⌛ Exporting...';
+
+            try {
+                const resp = await fetch('api/admin/export', {
+                    headers: { 'Authorization': token }
+                });
+
+                if (resp.ok) {
+                    const blob = await resp.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `golden_leads_${new Date().toISOString().split('T')[0]}.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                } else {
+                    alert('Failed to export. Session might have expired.');
+                }
+            } catch (err) {
+                alert('Export error occurred.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '📥 Export to Excel (CSV)';
+            }
+        });
+
+        // ─── Reveal Animations ──────────────────────────────────────────
+        const revealObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.reveal, .reveal-up').forEach(el => {
+            revealObserver.observe(el);
+        });
+
+        fetchLeads();
+    </script>
+</body>
+
+</html>

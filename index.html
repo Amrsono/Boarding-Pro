@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golden Opportunities | Egypt Real Estate</title>
+    <meta name="description"
+        content="Discover premium real estate opportunities in Egypt from top developers like TMG, Emaar, Palm Hills, and Mountain View.">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <!-- Animated Particle Canvas -->
+    <canvas id="particle-canvas"></canvas>
+
+    <!-- Floating Orbs -->
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+
+    <header class="navbar">
+        <div class="logo">
+            <span class="gold-text">Golden</span>Boarding
+            <span class="live-badge">● LIVE</span>
+        </div>
+        <nav>
+            <a href="#stats" class="nav-link">Market</a>
+            <a href="#featured" class="nav-link">Opportunities</a>
+            <a href="#developers" class="nav-link">Developers</a>
+            <a href="#news" class="nav-link">IR News</a>
+            <a href="admin-login.html" class="nav-link" style="opacity: 0.6; font-size: 0.8rem; margin-left: 1rem;">🛡️
+                Admin</a>
+        </nav>
+        <button class="cta-button pulse-glow">Invest Now</button>
+    </header>
+
+    <main class="dashboard-container">
+        <!-- Hero Section -->
+        <section class="hero glass-panel reveal">
+            <div class="hero-badge">🏆 #1 Egypt Real Estate Dashboard</div>
+            <h1>Your Gateway to Egypt's <span class="gold-text glow shimmer-text">Finest Real Estate</span></h1>
+            <p>Seamlessly discover and invest in exclusive properties from top developers like TMG, Emaar Misr, Palm
+                Hills, and Mountain View.</p>
+            <div class="hero-actions">
+                <a href="#featured" class="cta-button pulse-glow"
+                    style="text-decoration: none; display: inline-block;">Explore Opportunities</a>
+                <a href="#stats" class="cta-button-outline" style="text-decoration: none; display: inline-block;">View
+                    Market Data</a>
+            </div>
+        </section>
+
+        <!-- Animated Market Stats -->
+        <section id="stats" class="section-title-wrap reveal">
+            <h2>Market <span class="gold-text">Overview</span></h2>
+            <p class="subtitle">Real-time market intelligence from Egypt's top developers</p>
+            <div class="stats-row">
+                <div class="counter-card glass-panel reveal-up">
+                    <div class="counter-icon">🏗️</div>
+                    <div class="counter-value" data-target="42" data-suffix="+">0</div>
+                    <div class="counter-label">Active Projects</div>
+                </div>
+                <div class="counter-card glass-panel reveal-up" style="animation-delay: 0.1s">
+                    <div class="counter-icon">🏠</div>
+                    <div class="counter-value" data-target="18500" data-suffix="+">0</div>
+                    <div class="counter-label">Units Delivered</div>
+                </div>
+                <div class="counter-card glass-panel reveal-up" style="animation-delay: 0.2s">
+                    <div class="counter-icon">📐</div>
+                    <div class="counter-value" data-target="25000" data-suffix="">0</div>
+                    <div class="counter-label">Total Feddan</div>
+                </div>
+                <div class="counter-card glass-panel reveal-up" style="animation-delay: 0.3s">
+                    <div class="counter-icon">💰</div>
+                    <div class="counter-value" data-target="45" data-suffix="K EGP/m²">0</div>
+                    <div class="counter-label">Avg. Price</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Live Stock Ticker + Currency -->
+        <section class="ticker-section reveal">
+            <div class="ticker-row glass-panel">
+                <div class="ticker-header">
+                    <span class="ticker-label">📈 EGX Live</span>
+                    <span class="live-dot-inline">●</span>
+                </div>
+                <div class="ticker-stocks" id="stock-ticker">
+                    <div class="ticker-loading">Loading stock data...</div>
+                </div>
+                <div class="ticker-divider"></div>
+                <div class="ticker-currency" id="currency-display">
+                    <span class="currency-loading">Loading rates...</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Golden Opportunities Feed -->
+        <section id="featured" class="section-title-wrap reveal">
+            <h2>Golden <span class="gold-text">Opportunities</span></h2>
+            <div class="grid-layout" id="opportunities-grid">
+                <!-- Injected via JS -->
+            </div>
+        </section>
+
+        <!-- Developer Insights (Live) -->
+        <section id="developers" class="section-title-wrap reveal">
+            <h2>Top <span class="gold-text">Developers</span></h2>
+            <div class="developer-stats" id="developers-grid">
+                <!-- Injected via JS from /api/market -->
+            </div>
+        </section>
+
+        <!-- Live Scraped News Feed -->
+        <section id="news" class="section-title-wrap reveal">
+            <h2>Latest <span class="gold-text">IR Headlines</span></h2>
+            <p class="subtitle">
+                Live alerts from developer investor relations pages
+                <span class="live-dot-inline">●</span>
+            </p>
+            <div class="news-ticker glass-panel" id="news-container">
+                <!-- Loading State -->
+                <div class="skeleton-loader" id="news-skeleton">
+                    <div class="skeleton-line skeleton-wide"></div>
+                    <div class="skeleton-line skeleton-medium"></div>
+                    <div class="skeleton-line skeleton-wide"></div>
+                    <div class="skeleton-line skeleton-medium"></div>
+                </div>
+            </div>
+            <div class="news-meta" id="news-meta"></div>
+        </section>
+    </main>
+
+    <footer class="footer glass-panel">
+        <p>🏠 GoldenBoarding Dashboard — Real-time Egypt Real Estate Intelligence</p>
+        <p class="footer-sub">Data scraped live from developer IR pages. Not financial advice.</p>
+    </footer>
+
+    <!-- Opportunity Detail Modal -->
+    <div class="modal-overlay" id="detail-modal">
+        <div class="modal-content glass-panel">
+            <button class="modal-close" id="modal-close">&times;</button>
+            <div class="modal-body">
+                <img class="modal-image" id="modal-image" src="" alt="">
+                <div class="modal-info">
+                    <span class="modal-developer" id="modal-developer"></span>
+                    <h2 class="modal-title" id="modal-title"></h2>
+                    <p class="modal-location" id="modal-location"></p>
+                    <p class="modal-description" id="modal-description"></p>
+                    <div class="modal-specs" id="modal-specs"></div>
+                    <div class="modal-highlights" id="modal-highlights"></div>
+                    <div class="modal-actions">
+                        <button class="cta-button pulse-glow" id="btn-brochure">Request Brochure</button>
+                        <button class="cta-button-outline" id="btn-schedule">Schedule Visit</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Booking Form Modal -->
+    <div id="booking-modal" class="modal-overlay">
+        <div class="modal-content glass-panel" style="max-width: 500px;">
+            <button class="modal-close" id="booking-close">&times;</button>
+            <div class="booking-header">
+                <h2>Schedule <span class="gold-text">Visit</span></h2>
+                <p id="booking-project-name" class="subtitle" style="margin-bottom: 1.5rem;"></p>
+            </div>
+            <form id="booking-form" class="booking-form">
+                <div class="form-group">
+                    <label for="booking-name">Full Name</label>
+                    <input type="text" id="booking-name" required placeholder="Enter your full name">
+                </div>
+                <div class="form-group">
+                    <label for="booking-email">Email Address</label>
+                    <input type="email" id="booking-email" required placeholder="Enter your email">
+                </div>
+                <div class="form-group">
+                    <label for="booking-phone">Phone Number</label>
+                    <input type="tel" id="booking-phone" required placeholder="+20 1xx xxxx xxx">
+                </div>
+                <div class="form-group">
+                    <label for="booking-date">Preferred Date</label>
+                    <input type="date" id="booking-date" required>
+                </div>
+                <button type="submit" class="cta-button pulse-glow" style="width: 100%; margin-top: 1rem;">Confirm
+                    Appointment</button>
+            </form>
+            <div id="booking-success" class="booking-success" style="display: none;">
+                <div class="success-icon">✅</div>
+                <h3>Request Sent!</h3>
+                <p>Our consultant will contact you shortly to confirm the appointment.</p>
+                <button class="cta-button-outline" id="btn-success-close" style="margin-top: 1.5rem;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <footer class="main-footer reveal">
+        <div class="footer-content">
+            <div class="footer-logo">
+                <span class="gold-text">Golden</span>Boarding
+            </div>
+            <div class="footer-links">
+                <a href="#stats">Market</a>
+                <a href="#featured">Opportunities</a>
+                <a href="admin-login.html" class="admin-link">🛡️ Admin Portal</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            &copy; 2024 GoldenBoarding Egypt. All rights reserved.
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
