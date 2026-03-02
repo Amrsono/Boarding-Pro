@@ -5,26 +5,34 @@ const cheerio = require('cheerio');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const { createClient } = require('@supabase/supabase-js');
+const { MongoClient, ObjectId } = require('mongodb');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const NEWS_API_KEY = process.env.NEWS_API_KEY || '';
 
-// Initialize Supabase
-let supabase = null;
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+// Initialize MongoDB
+const MONGODB_URI = process.env.MONGODB_URI;
+const DB_NAME = process.env.DB_NAME || 'golden_boarding';
+let db = null;
 
-if (supabaseUrl && supabaseKey && !supabaseUrl.includes('your_supabase_url_here')) {
+async function connectToMongo() {
+    if (db) return db;
+    if (!MONGODB_URI) {
+        console.warn('⚠️ MONGODB_URI missing. Using in-memory fallback for this session.');
+        return null;
+    }
     try {
-        supabase = createClient(supabaseUrl, supabaseKey);
+        const client = await MongoClient.connect(MONGODB_URI);
+        db = client.db(DB_NAME);
+        console.log('✅ Connected to MongoDB Atlas');
+        return db;
     } catch (err) {
-        console.error('❌ Supabase Init Error:', err.message);
+        console.error('❌ MongoDB Connection Error:', err.message);
+        return null;
     }
 }
 
-if (!supabase) console.warn('⚠️ Supabase credentials missing or invalid. Lead saving will fail.');
 
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'golden2024';
@@ -376,20 +384,17 @@ app.post('/api/bookings', async (req, res) => {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    if (!supabase) {
-        return res.status(503).json({ error: 'Database not configured' });
-    }
-
     try {
-        const { data, error } = await supabase
-            .from('bookings')
-            .insert([
-                { name, email, phone, date, project, developer, type }
-            ])
-            .select();
+        const database = await connectToMongo();
+        if (!database) throw new Error('Database not connected');
 
-        if (error) throw error;
-        res.status(201).json({ message: 'Booking successful', booking: data[0] });
+        const result = await database.collection('bookings').insertOne({
+            name, email, phone, date, project, developer, type,
+            timestamp: new Date().toISOString(),
+            created_at: new Date()
+        });
+
+        res.status(201).json({ message: 'Booking successful', id: result.insertedId });
     } catch (err) {
         res.status(500).json({ error: 'Failed to save booking', message: err.message });
     }
@@ -408,16 +413,16 @@ app.post('/api/admin/login', (req, res) => {
 
 // Get all bookings
 app.get('/api/admin/bookings', isAdmin, async (req, res) => {
-    if (!supabase) return res.status(503).json({ error: 'Database not configured' });
-
     try {
-        const { data, error } = await supabase
-            .from('bookings')
-            .select('*')
-            .order('created_at', { ascending: false });
+        const database = await connectToMongo();
+        if (!database) throw new Error('Database not connected');
 
-        if (error) throw error;
-        res.json(data);
+        const bookings = await database.collection('bookings')
+            .find({})
+            .sort({ created_at: -1 })
+            .toArray();
+
+        res.json(bookings);
     } catch (err) {
         res.status(500).json({ error: 'Failed to read bookings', message: err.message });
     }
@@ -425,20 +430,20 @@ app.get('/api/admin/bookings', isAdmin, async (req, res) => {
 
 // Export bookings as CSV
 app.get('/api/admin/export', isAdmin, async (req, res) => {
-    if (!supabase) return res.status(503).json({ error: 'Database not configured' });
-
     try {
-        const { data: bookings, error } = await supabase
-            .from('bookings')
-            .select('*')
-            .order('created_at', { ascending: false });
+        const database = await connectToMongo();
+        if (!database) throw new Error('Database not connected');
 
-        if (error) throw error;
+        const bookings = await database.collection('bookings')
+            .find({})
+            .sort({ created_at: -1 })
+            .toArray();
+
         if (!bookings || bookings.length === 0) return res.status(404).send('No bookings to export');
 
         const headers = ['ID', 'Timestamp', 'Project', 'Developer', 'Name', 'Email', 'Phone', 'Visit Date'];
         const rows = bookings.map(b => [
-            b.id, b.created_at || b.timestamp, b.project, b.developer, b.name, b.email, b.phone, b.date || 'N/A'
+            b._id, b.timestamp, b.project, b.developer, b.name, b.email, b.phone, b.date || 'N/A'
         ]);
 
         const csvContent = [headers, ...rows].map(r => r.join(',')).join('\n');
