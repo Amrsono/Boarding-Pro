@@ -9,10 +9,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # Developer IR / News endpoints
 DEVELOPERS = {
-    "TMG": "https://www.talaatmoustafa.com/News.aspx",
-    "Emaar Misr": "https://emaarmisr.com/en/news/",
+    "TMG": "https://talaatmoustafa.com/news-events/",
+    "Emaar Misr": "https://www.emaarmisr.com/press-releases/",
     "Palm Hills": "https://www.palmhillsdevelopments.com/investor-relations/news",
-    "Mountain View": "https://mountainviewegypt.com/news"
+    "Mountain View": "https://www.mountainviewegypt.com/media-room"
 }
 
 # Real estate portals could also be included here

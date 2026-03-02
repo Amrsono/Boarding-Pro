@@ -219,10 +219,10 @@ app.get('/api/currency', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const DEVELOPERS = [
-    { name: 'TMG', fullName: 'Talaat Moustafa Group', url: 'https://www.talaatmoustafa.com/News.aspx', logo: '🏛️' },
-    { name: 'Emaar Misr', fullName: 'Emaar Misr', url: 'https://emaarmisr.com/en/news/', logo: '🌟' },
+    { name: 'TMG', fullName: 'Talaat Moustafa Group', url: 'https://talaatmoustafa.com/news-events/', logo: '🏛️' },
+    { name: 'Emaar Misr', fullName: 'Emaar Misr', url: 'https://www.emaarmisr.com/press-releases/', logo: '🌟' },
     { name: 'Palm Hills', fullName: 'Palm Hills Developments', url: 'https://www.palmhillsdevelopments.com/investor-relations/news', logo: '🌴' },
-    { name: 'Mountain View', fullName: 'Mountain View Egypt', url: 'https://mountainviewegypt.com/news', logo: '⛰️' }
+    { name: 'Mountain View', fullName: 'Mountain View Egypt', url: 'https://www.mountainviewegypt.com/media-room', logo: '⛰️' }
 ];
 
 // NewsAPI.org — real news articles about Egypt real estate
@@ -527,10 +527,22 @@ app.get('/api/market', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // HEALTH CHECK
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
+    let dbStatus = 'disconnected';
+    try {
+        const database = await connectToMongo();
+        if (database) {
+            await database.command({ ping: 1 });
+            dbStatus = 'connected';
+        }
+    } catch (e) {
+        dbStatus = `error: ${e.message}`;
+    }
+
     res.json({
-        status: 'ok',
+        status: dbStatus === 'connected' ? 'ok' : 'degraded',
         uptime: process.uptime(),
+        database: dbStatus,
         apis: {
             newsApi: NEWS_API_KEY && NEWS_API_KEY !== 'demo' ? 'configured' : 'not configured (using scraper only)',
             yahooFinance: 'enabled',
