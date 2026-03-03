@@ -1100,28 +1100,214 @@ body {
     flex-wrap: wrap;
 }
 
+/* ─── Forms & Utilities ────────────────────────────────────────────────── */
+.booking-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.form-group label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.form-group input {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-main);
+    font-family: inherit;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: var(--gold);
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.2);
+}
+
+.booking-header {
+    text-align: center;
+    margin-bottom: 1rem;
+}
+
+.booking-success {
+    text-align: center;
+    padding: 2rem 1rem;
+}
+
+.success-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    animation: fadeInUp 0.5s ease-out;
+}
+
+.main-footer {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 3rem 5% 1rem;
+    background: rgba(15, 23, 42, 0.5);
+}
+
+.footer-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 1200px;
+    margin: 0 auto 2rem;
+}
+
+.footer-logo {
+    font-size: 1.2rem;
+    font-weight: 800;
+}
+
+.footer-links {
+    display: flex;
+    gap: 2rem;
+}
+
+.footer-links a {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: color 0.3s;
+}
+
+.footer-links a:hover {
+    color: var(--gold);
+}
+
+.footer-bottom {
+    text-align: center;
+    color: rgba(148, 163, 184, 0.5);
+    font-size: 0.8rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
 /* ─── Responsive ────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-    .navbar {
+
+    /* Container & Spacing */
+    .dashboard-container {
+        padding: 1rem 4%;
+    }
+
+    .glass-panel {
+        padding: 1.5rem;
+    }
+
+    .section-title-wrap {
+        margin-bottom: 2.5rem;
+    }
+
+    /* Forms & Inputs (Touch Targets) */
+    input[type="text"],
+    input[type="email"],
+    input[type="tel"],
+    input[type="date"],
+    input[type="password"] {
+        padding: 0.8rem;
+        font-size: 1rem;
+        /* Prevents iOS auto-zoom */
+    }
+
+    /* Footer */
+    .main-footer .footer-content {
         flex-direction: column;
+        gap: 1.5rem;
+        text-align: center;
+    }
+
+    .footer-links {
+        justify-content: center;
+        flex-wrap: wrap;
         gap: 1rem;
     }
 
+    /* Navbar */
+    .navbar {
+        flex-direction: column;
+        gap: 1rem;
+        padding: 1rem 5%;
+    }
+
+    .navbar nav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.5rem;
+    }
+
+    .nav-link {
+        margin: 0 0.5rem;
+        font-size: 0.9rem;
+    }
+
+    /* Typography */
     .hero h1 {
         font-size: 2.2rem;
     }
 
-    .stats-row {
-        grid-template-columns: repeat(2, 1fr);
+    .section-title-wrap h2 {
+        font-size: 1.8rem;
     }
 
-    .grid-layout {
+    .hero p {
+        font-size: 1rem;
+    }
+
+    /* Grids & Cards */
+    .stats-row {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+    }
+
+    .counter-card {
+        padding: 1.5rem 1rem;
+    }
+
+    .grid-layout,
+    .developer-stats {
         grid-template-columns: 1fr;
     }
 
+    /* Buttons */
+    .hero-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        align-items: stretch;
+    }
+
+    .cta-button,
+    .cta-button-outline {
+        width: 100%;
+        margin-left: 0;
+        text-align: center;
+        padding: 0.8rem 1.2rem;
+    }
+
+    /* Ticker */
+    .ticker-row {
+        padding: 1rem;
+    }
+
+    /* News */
     .news-item {
         flex-direction: column;
         align-items: flex-start;
+        padding: 1rem;
     }
 
     .news-date {
@@ -1129,24 +1315,61 @@ body {
         margin-top: 0.5rem;
     }
 
-    .hero-actions {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        align-items: center;
+    /* Modals */
+    .modal-overlay {
+        padding: 0.8rem;
     }
 
-    .cta-button-outline {
+    .modal-content {
+        margin: auto;
+        padding-bottom: 2rem;
+        /* Extra space for scrolling */
+    }
+
+    .modal-info {
+        padding: 1.2rem;
+    }
+
+    .modal-image {
+        height: 180px;
+    }
+
+    .modal-title {
+        font-size: 1.5rem;
+    }
+
+    .modal-actions {
+        flex-direction: column;
+        gap: 0.8rem;
+    }
+
+    .modal-actions button {
+        width: 100%;
         margin-left: 0;
     }
 }
 
 @media (max-width: 480px) {
+
+    /* Extreme Small Screens */
     .stats-row {
         grid-template-columns: 1fr;
     }
 
     .counter-value {
         font-size: 2rem;
+    }
+
+    .hero h1 {
+        font-size: 1.8rem;
+    }
+
+    .logo {
+        font-size: 1.2rem;
+    }
+
+    .hero-badge {
+        font-size: 0.75rem;
+        padding: 0.4rem 1rem;
     }
 }
