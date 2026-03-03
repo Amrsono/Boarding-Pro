@@ -225,6 +225,66 @@ const DEVELOPERS = [
     { name: 'Mountain View', fullName: 'Mountain View Egypt', url: 'https://www.mountainviewegypt.com/media-room', logo: '⛰️' }
 ];
 
+// ═══════════════════════════════════════════════════════════════════════════
+// RELEVANCE FILTERING
+// ═══════════════════════════════════════════════════════════════════════════
+const RELEVANT_STRONG = [
+    'southmed', 'tmg', 'talaat moustafa', 'emaar', 'palm hills', 'mountain view',
+    'north coast', 'new capital', 'mostakbal city', 'madinaty', 'ras el hekma',
+    'cairo gate', 'marassi', 'hacienda', 'south med'
+];
+
+const RELEVANT_WEAK = [
+    'egypt', '2026', 'real estate', 'property', 'investment', 'development',
+    'residential', 'commercial', 'housing', 'villa', 'apartment', 'launch',
+    'project', 'sales', 'revenue', 'profit', 'market', 'growth', 'construction',
+    'urban', 'infrastructure', 'accommodation'
+];
+
+const NOISE_KEYWORDS = [
+    'internship', 'football', 'sport', 'ceremony', 'celebration', 'award',
+    'partnership with', 'internship programme', 'summer internship', 'training',
+    'cloud infrastructure', 'stock market', 'global market', 'market research',
+    'reach usd', 'billion by 20', 'ambassador', 'israel', 'huckabee', 'detonated',
+    'geopolitical', 'agenda of', 'supremacism', 'tucker carlson'
+];
+
+function isRelevant(text = '') {
+    const lowerText = text.toLowerCase();
+
+    // 1. Strict Noise Filter
+    for (const word of NOISE_KEYWORDS) {
+        if (lowerText.includes(word)) return false;
+    }
+
+    // 2. Count matches
+    let strongCount = 0;
+    for (const word of RELEVANT_STRONG) {
+        if (lowerText.includes(word)) strongCount++;
+    }
+
+    let weakCount = 0;
+    for (const word of RELEVANT_WEAK) {
+        if (lowerText.includes(word)) weakCount++;
+    }
+
+    // 3. Logic:
+    // - Always relevant if it mentions a specific developer/project (STRONG)
+    if (strongCount >= 1) return true;
+
+    // - Relevant if it mentions Egypt + 2026 + (Real Estate terms)
+    const mentionsEgypt = lowerText.includes('egypt');
+    const mentions2026 = lowerText.includes('2026');
+    const mentionsRealEstate = lowerText.includes('real estate') || lowerText.includes('property') || lowerText.includes('housing') || lowerText.includes('investment');
+
+    if (mentionsEgypt && mentions2026 && mentionsRealEstate) return true;
+
+    // - Relevant if it has many real estate terms (WEAK) regardless of country
+    if (weakCount >= 3 && mentionsRealEstate) return true;
+
+    return false;
+}
+
 // NewsAPI.org — real news articles about Egypt real estate
 async function fetchNewsAPIHeadlines() {
     if (!NEWS_API_KEY || NEWS_API_KEY === 'demo') {
@@ -235,25 +295,27 @@ async function fetchNewsAPIHeadlines() {
     try {
         const { data } = await axios.get('https://newsapi.org/v2/everything', {
             params: {
-                q: '(Egypt real estate) OR (TMG SouthMED) OR (Emaar Misr) OR (Palm Hills) OR (Mountain View Egypt)',
+                q: '(Egypt 2026 real estate) OR (SouthMED 2026) OR (TMG Egypt) OR (Emaar Misr 2026) OR (Palm Hills 2026) OR (Mountain View Egypt 2026)',
                 language: 'en',
                 sortBy: 'publishedAt',
-                pageSize: 10,
+                pageSize: 15,
                 apiKey: NEWS_API_KEY
             },
             timeout: 8000
         });
 
-        return (data.articles || []).map(article => ({
-            title: article.title,
-            source: article.source?.name || 'News',
-            link: article.url,
-            publishedAt: article.publishedAt,
-            description: article.description,
-            imageUrl: article.urlToImage,
-            logo: '📰',
-            via: 'NewsAPI'
-        }));
+        return (data.articles || [])
+            .filter(article => isRelevant(article.title + ' ' + (article.description || '')))
+            .map(article => ({
+                title: article.title,
+                source: article.source?.name || 'News',
+                link: article.url,
+                publishedAt: article.publishedAt,
+                description: article.description,
+                imageUrl: article.urlToImage,
+                logo: '📰',
+                via: 'NewsAPI'
+            }));
 
     } catch (err) {
         console.error('[NEWS API ERROR]', err.message);
@@ -274,7 +336,7 @@ async function scrapeDevNews(dev) {
 
         $('h2, h3, h4').each((i, el) => {
             const text = $(el).text().trim();
-            if (text.length > 15 && text.length < 200 && headlines.length < 5) {
+            if (text.length > 15 && text.length < 200 && headlines.length < 5 && isRelevant(text)) {
                 const link = $(el).closest('a').attr('href') || $(el).find('a').attr('href') || '#';
                 const fullLink = link.startsWith('http') ? link : (dev.url + link);
                 headlines.push({
@@ -378,15 +440,20 @@ app.get('/api/news', async (req, res) => {
 
 // Save a new booking
 app.post('/api/bookings', async (req, res) => {
+    console.log('[BOOKING REQUEST]', req.body);
     const { name, email, phone, date, project, developer, type } = req.body;
 
     if (!name || !email || !phone || !project) {
+        console.warn('[BOOKING VALIDATION FAILED] Missing fields:', { name, email, phone, project });
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
     try {
         const database = await connectToMongo();
-        if (!database) throw new Error('Database not connected');
+        if (!database) {
+            console.error('[BOOKING ERROR] Database not connected');
+            throw new Error('Database not connected');
+        }
 
         const result = await database.collection('bookings').insertOne({
             name, email, phone, date, project, developer, type,
@@ -394,8 +461,10 @@ app.post('/api/bookings', async (req, res) => {
             created_at: new Date()
         });
 
+        console.log('[BOOKING SUCCESS] ID:', result.insertedId);
         res.status(201).json({ message: 'Booking successful', id: result.insertedId });
     } catch (err) {
+        console.error('[BOOKING ERROR]', err.message);
         res.status(500).json({ error: 'Failed to save booking', message: err.message });
     }
 });
