@@ -177,7 +177,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelector('.hero')?.classList.add('visible');
 
     // Section intent signals (once per section)
-    ['stats', 'featured', 'developers', 'news'].forEach((id) => {
+    ['stats', 'featured', 'developers', 'insights', 'news'].forEach((id) => {
         const el = document.getElementById(id);
         if (!el) return;
         const obs = new IntersectionObserver((entries) => {
@@ -350,12 +350,143 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.classList.remove('active');
         document.body.style.overflow = '';
         currentOpp = null;
+        // Notify any listeners (e.g., insights dwell tracker)
+        const evt = new CustomEvent('gb_insight_close');
+        document.dispatchEvent(evt);
     }
 
     modalClose.addEventListener('click', closeModal);
     modal.addEventListener('click', (e) => {
         if (e.target === modal) closeModal();
     });
+
+    // ─── Ungated Insights (Content Hub) ───────────────────────────────────
+    const insights = [
+        {
+            id: 'egypt-2026-outlook',
+            tag: 'Macro',
+            title: 'Egypt 2026 Real Estate Outlook',
+            meta: 'Where capital is flowing across New Capital, North Coast, and East Cairo.',
+            audience: 'Ideal for offshore investors and family offices.',
+            readingMinutes: 6,
+            bullets: [
+                'How FX, inflation, and interest rates are reshaping pricing power.',
+                'Which geographies are seeing genuine end-user demand vs. speculative flows.',
+                'Signals that a project is institutionally interesting in 2026.'
+            ]
+        },
+        {
+            id: 'southmed-vs-ras-el-hekma',
+            tag: 'Strategy',
+            title: 'SouthMED vs Ras El Hekma: Allocation Playbook',
+            meta: 'Framework to split tickets between TMG coastal and Ras El Hekma boutique plays.',
+            audience: 'Ideal for tickets above 5M EGP.',
+            readingMinutes: 5,
+            bullets: [
+                'Risk/return comparison between TMG, Palm Hills, and Mountain View coastal assets.',
+                'How to think about resale liquidity in each sub-market.',
+                'Sample allocation mixes by ticket size (3M–30M EGP).'
+            ]
+        },
+        {
+            id: 'institutional-readiness-checklist',
+            tag: 'Playbook',
+            title: 'Institutional Readiness Checklist for Egypt Projects',
+            meta: '15-point checklist to judge if a project is “institutional-grade”.',
+            audience: 'Developers, brokers, and serious allocators.',
+            readingMinutes: 4,
+            bullets: [
+                'Governance, disclosure, and IR basics international capital expects.',
+                'Unit mix, payment terms, and phaseing signals that matter most.',
+                'Which metrics to track post-launch to de-risk follow-on allocations.'
+            ]
+        }
+    ];
+
+    const insightsGrid = document.getElementById('insights-grid');
+
+    function openInsightDetail(item) {
+        const base = document.getElementById('detail-modal');
+        if (!base) return;
+
+        // Reuse existing modal visually but treat as research detail
+        document.getElementById('modal-image').src = 'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80';
+        document.getElementById('modal-developer').textContent = 'Research · GoldenBoarding';
+        document.getElementById('modal-title').textContent = item.title;
+        document.getElementById('modal-location').textContent = '';
+
+        const paragraphs = [
+            item.meta,
+            item.audience,
+            'This is ungated strategic content designed to help serious investors make better allocation decisions across Egypt\'s leading developers and coastal corridors.'
+        ];
+        document.getElementById('modal-description').textContent = paragraphs.join(' ');
+
+        const specsEl = document.getElementById('modal-specs');
+        specsEl.innerHTML = `
+            <div class="spec-item">
+                <span class="spec-value">${item.readingMinutes} min</span>
+                <span class="spec-label">Estimated Read</span>
+            </div>
+            <div class="spec-item">
+                <span class="spec-value">${item.tag}</span>
+                <span class="spec-label">Category</span>
+            </div>
+        `;
+
+        const highlightsEl = document.getElementById('modal-highlights');
+        highlightsEl.innerHTML = item.bullets
+            .map(h => `<span class="modal-highlight-tag">• ${h}</span>`)
+            .join('');
+
+        track('content_view', { section: 'insights', contentId: item.id });
+
+        // Basic dwell tracking per insight
+        const start = Date.now();
+        function onClose() {
+            const durationMs = Date.now() - start;
+            track('content_dwell', {
+                section: 'insights',
+                contentId: item.id,
+                meta: { durationMs }
+            });
+            document.removeEventListener('gb_insight_close', onClose);
+        }
+        document.addEventListener('gb_insight_close', onClose);
+
+        openModal({
+            developer: 'Insights',
+            title: item.title,
+            location: '',
+            image: document.getElementById('modal-image').src,
+            description: document.getElementById('modal-description').textContent,
+            specs: { type: item.tag, area: `${item.readingMinutes} min`, priceRange: 'Ungated Research', delivery: '2026' },
+            highlights: item.bullets
+        });
+    }
+
+    if (insightsGrid) {
+        insights.forEach((ins) => {
+            const card = document.createElement('article');
+            card.className = 'insight-card reveal-up';
+            card.innerHTML = `
+                <div class="insight-tag">${ins.tag}</div>
+                <div class="insight-title">${ins.title}</div>
+                <div class="insight-meta">${ins.meta}</div>
+                <div class="insight-meta" style="margin-top:0.3rem; font-size:0.78rem;">
+                    ${ins.audience}
+                </div>
+                <button class="insight-cta" type="button">
+                    <span>Read ungated brief</span>
+                    <span>↗</span>
+                </button>
+            `;
+            const btn = card.querySelector('.insight-cta');
+            btn.addEventListener('click', () => openInsightDetail(ins));
+            insightsGrid.appendChild(card);
+            revealObserver.observe(card);
+        });
+    }
 
     // ─── Lead Generation Logic ───────────────────────────────────────────
     const btnBrochure = document.getElementById('btn-brochure');

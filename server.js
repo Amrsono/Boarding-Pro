@@ -56,7 +56,10 @@ const INTENT_EVENT_POINTS = {
     schedule_open: 12,
     booking_submit: 25,
     chat_message: 4,
-    time_on_page: 1
+    time_on_page: 1,
+    content_view: 4,
+    content_depth: 6,
+    content_dwell: 0
 };
 
 const INTENT_HOT_THRESHOLD = parseInt(process.env.INTENT_HOT_THRESHOLD || '35', 10);
@@ -138,6 +141,11 @@ function computeEventPoints(eventType, meta) {
         // Reward up to +10 for dwell time (30s steps)
         return clamp(Math.floor(durationMs / 30000), 0, 10);
     }
+    if (eventType === 'content_dwell') {
+        const durationMs = Number(meta?.durationMs || 0);
+        // Reward up to +12 for long-form engagement (~45s steps)
+        return clamp(Math.floor(durationMs / 45000), 0, 12);
+    }
     if (eventType === 'section_view') {
         const section = String(meta?.section || '').toLowerCase();
         if (section.includes('featured')) return 5;
@@ -167,6 +175,7 @@ async function recordIntentEvent(req, event) {
     const section = String(event.section || '').slice(0, 120);
     const developer = String(event.developer || '').slice(0, 80);
     const project = String(event.project || '').slice(0, 160);
+    const contentId = String(event.contentId || '').slice(0, 160);
     const meta = event.meta && typeof event.meta === 'object' ? event.meta : {};
 
     const points = computeEventPoints(eventType, { section, ...meta });
@@ -178,6 +187,7 @@ async function recordIntentEvent(req, event) {
         section,
         developer,
         project,
+        contentId,
         meta: {
             ...meta,
             points
@@ -216,6 +226,7 @@ async function recordIntentEvent(req, event) {
 
         if (developer) existing.interestTags = Array.from(new Set([...existing.interestTags, `dev:${developer}`])).slice(-30);
         if (project) existing.interestTags = Array.from(new Set([...existing.interestTags, `proj:${project}`])).slice(-30);
+        if (contentId) existing.interestTags = Array.from(new Set([...existing.interestTags, `content:${contentId}`])).slice(-30);
 
         const wasHot = !!existing.hot;
         existing.hot = existing.score >= INTENT_HOT_THRESHOLD;
@@ -262,12 +273,13 @@ async function recordIntentEvent(req, event) {
         }
     };
 
-    if (developer || project) {
+    if (developer || project || contentId) {
         update.$addToSet = {
             interestTags: {
                 $each: [
                     ...(developer ? [`dev:${developer}`] : []),
-                    ...(project ? [`proj:${project}`] : [])
+                    ...(project ? [`proj:${project}`] : []),
+                    ...(contentId ? [`content:${contentId}`] : [])
                 ]
             }
         };

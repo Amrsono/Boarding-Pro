@@ -303,6 +303,10 @@
             body.innerHTML = visitors.map(v => {
                 const last = v.lastProject || v.lastDeveloper || v.lastPage || '—';
                 const sig = v.eventCounts ? Object.entries(v.eventCounts).map(([k, val]) => `${k}:${val}`).slice(0, 3).join(' · ') : '—';
+                const contentTags = (v.interestTags || []).filter(t => t.startsWith('content:')).slice(-2);
+                const contentLabel = contentTags.length
+                    ? contentTags.map(t => t.replace('content:', '').replace(/-/g, ' ')).join(' · ')
+                    : '';
                 return `
                     <tr>
                         <td>${fmtAgo(v.lastSeen)}</td>
@@ -310,7 +314,10 @@
                             ${String(v.visitorId || '').slice(0, 10)}…
                         </td>
                         <td style="font-weight:700; color: var(--gold);">${v.score ?? 0}</td>
-                        <td>${last}</td>
+                        <td>
+                            <div>${last}</div>
+                            ${contentLabel ? `<div style="color: var(--text-muted); font-size: 0.75rem;">Read: ${contentLabel}</div>` : ''}
+                        </td>
                         <td style="color: var(--text-muted); font-size: 0.85rem;">${sig}</td>
                         <td>
                             <button class="cta-button-outline btn-view-intent" data-vid="${v.visitorId}" style="padding: 0.45rem 0.8rem;">View</button>
