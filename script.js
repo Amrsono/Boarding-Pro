@@ -4,6 +4,52 @@ document.addEventListener('DOMContentLoaded', () => {
     const API_BASE = window.location.origin; // works when served by Node
     const FALLBACK_MODE = !window.location.origin.includes('localhost:3000');
 
+    // ─── Privacy-first Intent Tracking (first-party) ───────────────────────
+    function getVisitorId() {
+        const key = 'gb_visitor_id';
+        let vid = localStorage.getItem(key);
+        if (!vid) {
+            if (crypto?.randomUUID) {
+                vid = crypto.randomUUID();
+            } else {
+                const bytes = new Uint8Array(16);
+                crypto.getRandomValues(bytes);
+                vid = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+            localStorage.setItem(key, vid);
+        }
+        return vid;
+    }
+
+    const VISITOR_ID = getVisitorId();
+    const sessionStart = Date.now();
+    const sentOnce = new Set();
+
+    function track(eventType, payload = {}) {
+        const body = {
+            visitorId: VISITOR_ID,
+            eventType,
+            page: window.location.pathname + window.location.hash,
+            ...payload
+        };
+
+        // Use keepalive where possible so signals survive navigation/close
+        try {
+            fetch('/api/intent/event', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Visitor-Id': VISITOR_ID
+                },
+                body: JSON.stringify(body),
+                keepalive: true
+            }).catch(() => { });
+        } catch (e) { /* ignore */ }
+    }
+
+    // Page view signal
+    track('page_view');
+
     // ─── Particle Canvas System ────────────────────────────────────────────
     const canvas = document.getElementById('particle-canvas');
     const ctx = canvas.getContext('2d');
@@ -130,6 +176,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Mark hero as visible immediately
     document.querySelector('.hero')?.classList.add('visible');
 
+    // Section intent signals (once per section)
+    ['stats', 'featured', 'developers', 'news'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const obs = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting && !sentOnce.has(`section:${id}`)) {
+                    sentOnce.add(`section:${id}`);
+                    track('section_view', { section: id });
+                }
+            });
+        }, { threshold: 0.35 });
+        obs.observe(el);
+    });
+
     // ─── Animated Counters ─────────────────────────────────────────────────
     let countersAnimated = false;
 
@@ -251,6 +312,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function openModal(opp) {
         currentOpp = opp;
+        try {
+            localStorage.setItem('gb_interest_dev', opp.developer || '');
+            localStorage.setItem('gb_interest_proj', opp.title || '');
+        } catch (e) { /* ignore */ }
+
+        track('modal_open', { developer: opp.developer, project: opp.title, section: 'featured' });
+
         document.getElementById('modal-image').src = opp.image;
         document.getElementById('modal-image').alt = opp.title;
         document.getElementById('modal-developer').textContent = opp.developer;
@@ -303,22 +371,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const link = brochureLinks[currentOpp.developer] || '#';
         window.open(link, '_blank');
 
-        // Silent log
-        fetch('/api/bookings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: 'Anonymous (Brochure Click)',
-                email: 'n/a', phone: 'n/a',
-                project: currentOpp.title,
-                developer: currentOpp.developer,
-                type: 'Brochure Request'
-            })
-        });
+        // Intent signal (keeps PII out of bookings)
+        track('brochure_click', { developer: currentOpp.developer, project: currentOpp.title, section: 'modal' });
     });
 
     btnSchedule.addEventListener('click', () => {
         if (!currentOpp) return;
+        track('schedule_open', { developer: currentOpp.developer, project: currentOpp.title, section: 'modal' });
         document.getElementById('booking-project-name').textContent = `${currentOpp.developer} - ${currentOpp.title}`;
         bookingModal.classList.add('active');
         bookingForm.style.display = 'flex';
@@ -345,7 +404,8 @@ document.addEventListener('DOMContentLoaded', () => {
             date: document.getElementById('booking-date').value,
             project: currentOpp.title,
             developer: currentOpp.developer,
-            type: 'Scheduled Visit'
+            type: 'Scheduled Visit',
+            visitorId: VISITOR_ID
         };
 
         try {
@@ -356,6 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (resp.ok) {
+                track('booking_submit', { developer: currentOpp.developer, project: currentOpp.title, section: 'booking' });
                 bookingForm.style.display = 'none';
                 bookingSuccess.style.display = 'block';
                 bookingForm.reset();
@@ -405,6 +466,141 @@ document.addEventListener('DOMContentLoaded', () => {
         // Observe for scroll reveal
         revealObserver.observe(card);
     });
+
+    // Dwell-time intent signal on close
+    window.addEventListener('beforeunload', () => {
+        const durationMs = Date.now() - sessionStart;
+        track('time_on_page', { meta: { durationMs } });
+    });
+
+    // ─── Simple Dynamic Personalization (on return visits) ─────────────────
+    try {
+        const dev = localStorage.getItem('gb_interest_dev');
+        const proj = localStorage.getItem('gb_interest_proj');
+        if (dev && proj) {
+            const badge = document.querySelector('.hero-badge');
+            if (badge) badge.textContent = `✨ Tailored for your interest: ${dev}`;
+            const h1 = document.querySelector('.hero h1');
+            if (h1) {
+                h1.innerHTML = `Explore <span class="gold-text glow shimmer-text">${dev}</span> opportunities in Egypt`;
+            }
+        }
+    } catch (e) { /* ignore */ }
+
+    // ─── 24/7 Conversational Marketing (AI Chat Widget) ────────────────────
+    function initChatWidget() {
+        const launcher = document.createElement('button');
+        launcher.className = 'gb-chat-launcher pulse-glow';
+        launcher.type = 'button';
+        launcher.setAttribute('aria-label', 'Open assistant chat');
+        launcher.innerHTML = '💬';
+
+        const panel = document.createElement('div');
+        panel.className = 'gb-chat-panel glass-panel';
+        panel.innerHTML = `
+            <div class="gb-chat-header">
+                <div style="font-weight:800;">Golden Assistant</div>
+                <button class="gb-chat-close" type="button" aria-label="Close chat">&times;</button>
+            </div>
+            <div class="gb-chat-messages" id="gb-chat-messages"></div>
+            <form class="gb-chat-form" id="gb-chat-form">
+                <input class="gb-chat-input" id="gb-chat-input" placeholder="Ask about projects, payment plans, ROI…" autocomplete="off" />
+                <button class="gb-chat-send cta-button" type="submit" style="padding:0.55rem 0.9rem; font-size:0.9rem;">Send</button>
+            </form>
+            <div class="gb-chat-footnote">Privacy-first: no third-party tracking. Avoid sharing sensitive info.</div>
+        `;
+
+        document.body.appendChild(launcher);
+        document.body.appendChild(panel);
+
+        const messagesEl = panel.querySelector('#gb-chat-messages');
+        const formEl = panel.querySelector('#gb-chat-form');
+        const inputEl = panel.querySelector('#gb-chat-input');
+        const closeEl = panel.querySelector('.gb-chat-close');
+
+        const stateKey = 'gb_chat_history';
+        function pushMsg(role, text) {
+            const row = document.createElement('div');
+            row.className = `gb-chat-msg ${role === 'user' ? 'user' : 'bot'}`;
+            row.textContent = text;
+            messagesEl.appendChild(row);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function loadHistory() {
+            try {
+                const raw = sessionStorage.getItem(stateKey);
+                if (!raw) return;
+                const items = JSON.parse(raw);
+                if (!Array.isArray(items)) return;
+                items.slice(-20).forEach(m => pushMsg(m.role, m.text));
+            } catch (e) { /* ignore */ }
+        }
+
+        function saveHistory(role, text) {
+            try {
+                const raw = sessionStorage.getItem(stateKey);
+                const items = raw ? JSON.parse(raw) : [];
+                const next = Array.isArray(items) ? items : [];
+                next.push({ role, text, t: Date.now() });
+                sessionStorage.setItem(stateKey, JSON.stringify(next.slice(-40)));
+            } catch (e) { /* ignore */ }
+        }
+
+        function open() {
+            panel.classList.add('active');
+            launcher.classList.add('hidden');
+            if (!messagesEl.dataset.loaded) {
+                messagesEl.dataset.loaded = '1';
+                loadHistory();
+                if (!messagesEl.childElementCount) {
+                    pushMsg('bot', 'Tell me your budget range + preferred area (North Coast / New Cairo / New Capital) and I’ll shortlist the best matches.');
+                }
+            }
+            setTimeout(() => inputEl?.focus(), 50);
+        }
+
+        function close() {
+            panel.classList.remove('active');
+            launcher.classList.remove('hidden');
+        }
+
+        launcher.addEventListener('click', open);
+        closeEl.addEventListener('click', close);
+
+        formEl.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const text = (inputEl.value || '').trim();
+            if (!text) return;
+
+            inputEl.value = '';
+            pushMsg('user', text);
+            saveHistory('user', text);
+
+            try {
+                const resp = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Visitor-Id': VISITOR_ID
+                    },
+                    body: JSON.stringify({
+                        visitorId: VISITOR_ID,
+                        message: text,
+                        page: window.location.pathname + window.location.hash
+                    })
+                });
+                const data = await resp.json();
+                const reply = data?.reply || 'I can help—what developer or area are you interested in?';
+                pushMsg('bot', reply);
+                saveHistory('bot', reply);
+            } catch (err) {
+                pushMsg('bot', 'Chat is temporarily unavailable. Please try again in a minute.');
+            }
+        });
+    }
+
+    initChatWidget();
 
     // ─── Fetch Live Stock Data ──────────────────────────────────────────────
     async function fetchStockData() {

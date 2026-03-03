@@ -5,11 +5,15 @@ const cheerio = require('cheerio');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { MongoClient, ObjectId } = require('mongodb');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const NEWS_API_KEY = process.env.NEWS_API_KEY || '';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const ALERT_WEBHOOK_URL = process.env.ALERT_WEBHOOK_URL || '';
+const ALERT_WEBHOOK_AUTH = process.env.ALERT_WEBHOOK_AUTH || '';
 
 // Initialize MongoDB
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -40,6 +44,270 @@ const ADMIN_PASS = process.env.ADMIN_PASS || 'golden2024';
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INTENT SIGNALS (Privacy-first, first-party)
+// ═══════════════════════════════════════════════════════════════════════════
+const INTENT_EVENT_POINTS = {
+    page_view: 1,
+    section_view: 3,
+    modal_open: 6,
+    brochure_click: 10,
+    schedule_open: 12,
+    booking_submit: 25,
+    chat_message: 4,
+    time_on_page: 1
+};
+
+const INTENT_HOT_THRESHOLD = parseInt(process.env.INTENT_HOT_THRESHOLD || '35', 10);
+
+const intentMemory = {
+    profiles: new Map(), // visitorId -> profile
+    events: [], // recent events only (bounded)
+    alerts: [] // recent alerts only (bounded)
+};
+
+function safeId(input = '') {
+    const s = String(input || '').trim();
+    if (!s) return '';
+    // Keep URL-safe, short-ish identifiers only
+    return s.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+}
+
+function getVisitorIdFromReq(req) {
+    const headerVid = req.headers['x-visitor-id'];
+    const bodyVid = req.body?.visitorId;
+    const vid = safeId(headerVid || bodyVid || '');
+    return vid || '';
+}
+
+function nowIso() {
+    return new Date().toISOString();
+}
+
+function clamp(num, min, max) {
+    return Math.max(min, Math.min(max, num));
+}
+
+async function sendAlert(triggerType, payload) {
+    const timestamp = nowIso();
+    const baseAlert = {
+        triggerType,
+        timestamp,
+        payload
+    };
+
+    // Persist to in-memory buffer
+    intentMemory.alerts.push(baseAlert);
+    if (intentMemory.alerts.length > 500) {
+        intentMemory.alerts.splice(0, intentMemory.alerts.length - 500);
+    }
+
+    const database = await getDatabaseOrNull();
+    if (database) {
+        try {
+            await database.collection('alerts').insertOne({
+                ...baseAlert,
+                created_at: new Date()
+            });
+        } catch (e) {
+            console.error('[ALERT DB ERROR]', e.message);
+        }
+    }
+
+    if (!ALERT_WEBHOOK_URL) return;
+
+    try {
+        await fetch(ALERT_WEBHOOK_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(ALERT_WEBHOOK_AUTH ? { 'Authorization': ALERT_WEBHOOK_AUTH } : {})
+            },
+            body: JSON.stringify(baseAlert)
+        });
+    } catch (e) {
+        console.error('[ALERT WEBHOOK ERROR]', e.message);
+    }
+}
+
+function computeEventPoints(eventType, meta) {
+    const base = INTENT_EVENT_POINTS[eventType] || 0;
+    if (eventType === 'time_on_page') {
+        const durationMs = Number(meta?.durationMs || 0);
+        // Reward up to +10 for dwell time (30s steps)
+        return clamp(Math.floor(durationMs / 30000), 0, 10);
+    }
+    if (eventType === 'section_view') {
+        const section = String(meta?.section || '').toLowerCase();
+        if (section.includes('featured')) return 5;
+        if (section.includes('news')) return 3;
+        if (section.includes('stats')) return 2;
+        return base;
+    }
+    return base;
+}
+
+async function getDatabaseOrNull() {
+    try {
+        return await connectToMongo();
+    } catch (e) {
+        return null;
+    }
+}
+
+async function recordIntentEvent(req, event) {
+    const visitorId = safeId(event.visitorId || '');
+    if (!visitorId) return null;
+
+    const eventType = String(event.eventType || '').trim();
+    if (!eventType) return null;
+
+    const page = String(event.page || '').slice(0, 200);
+    const section = String(event.section || '').slice(0, 120);
+    const developer = String(event.developer || '').slice(0, 80);
+    const project = String(event.project || '').slice(0, 160);
+    const meta = event.meta && typeof event.meta === 'object' ? event.meta : {};
+
+    const points = computeEventPoints(eventType, { section, ...meta });
+
+    const doc = {
+        visitorId,
+        eventType,
+        page,
+        section,
+        developer,
+        project,
+        meta: {
+            ...meta,
+            points
+        },
+        ua: String(req.headers['user-agent'] || '').slice(0, 240),
+        ref: String(req.headers['referer'] || '').slice(0, 300),
+        ipHint: String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').slice(0, 80),
+        created_at: new Date(),
+        timestamp: nowIso()
+    };
+
+    const database = await getDatabaseOrNull();
+    if (!database) {
+        // In-memory fallback
+        const existing = intentMemory.profiles.get(visitorId) || {
+            visitorId,
+            score: 0,
+            firstSeen: nowIso(),
+            lastSeen: nowIso(),
+            lastPage: '',
+            lastSection: '',
+            lastDeveloper: '',
+            lastProject: '',
+            interestTags: [],
+            eventCounts: {},
+            hot: false
+        };
+
+        existing.score = (existing.score || 0) + points;
+        existing.lastSeen = nowIso();
+        existing.lastPage = page || existing.lastPage;
+        existing.lastSection = section || existing.lastSection;
+        existing.lastDeveloper = developer || existing.lastDeveloper;
+        existing.lastProject = project || existing.lastProject;
+        existing.eventCounts[eventType] = (existing.eventCounts[eventType] || 0) + 1;
+
+        if (developer) existing.interestTags = Array.from(new Set([...existing.interestTags, `dev:${developer}`])).slice(-30);
+        if (project) existing.interestTags = Array.from(new Set([...existing.interestTags, `proj:${project}`])).slice(-30);
+
+        const wasHot = !!existing.hot;
+        existing.hot = existing.score >= INTENT_HOT_THRESHOLD;
+        intentMemory.profiles.set(visitorId, existing);
+
+        intentMemory.events.push(doc);
+        if (intentMemory.events.length > 5000) intentMemory.events.splice(0, intentMemory.events.length - 5000);
+
+        if (!wasHot && existing.hot) {
+            sendAlert('intent_hot', {
+                visitorId,
+                score: existing.score,
+                lastPage: existing.lastPage,
+                lastDeveloper: existing.lastDeveloper,
+                lastProject: existing.lastProject
+            });
+        }
+
+        return { profile: existing, event: doc };
+    }
+
+    const profilesCol = database.collection('intent_profiles');
+    const eventsCol = database.collection('intent_events');
+
+    await eventsCol.insertOne(doc);
+
+    const update = {
+        $set: {
+            lastSeen: doc.timestamp,
+            lastPage: page || '',
+            lastSection: section || '',
+            lastDeveloper: developer || '',
+            lastProject: project || '',
+            ua: doc.ua
+        },
+        $setOnInsert: {
+            visitorId,
+            firstSeen: doc.timestamp,
+            created_at: new Date()
+        },
+        $inc: {
+            score: points,
+            [`eventCounts.${eventType}`]: 1
+        }
+    };
+
+    if (developer || project) {
+        update.$addToSet = {
+            interestTags: {
+                $each: [
+                    ...(developer ? [`dev:${developer}`] : []),
+                    ...(project ? [`proj:${project}`] : [])
+                ]
+            }
+        };
+    }
+
+    const before = await profilesCol.findOne({ visitorId }) || null;
+    await profilesCol.findOneAndUpdate(
+        { visitorId },
+        update,
+        { upsert: true, returnDocument: 'after' }
+    );
+
+    // Read back profile (avoids driver return-shape differences)
+    let profile = await profilesCol.findOne({ visitorId });
+    if (profile) {
+        const previousScore = typeof before?.score === 'number' ? before.score : Number(before?.score || 0);
+        const scoreVal = typeof profile.score === 'number' ? profile.score : Number(profile.score || 0);
+        const hot = scoreVal >= INTENT_HOT_THRESHOLD;
+        const wasHot = !!before?.hot;
+
+        if (profile.hot !== hot) {
+            await profilesCol.updateOne({ visitorId }, { $set: { hot } });
+            profile.hot = hot;
+        }
+        profile.score = scoreVal;
+
+        if (!wasHot && hot) {
+            sendAlert('intent_hot', {
+                visitorId,
+                score: scoreVal,
+                previousScore,
+                lastPage: profile.lastPage,
+                lastDeveloper: profile.lastDeveloper,
+                lastProject: profile.lastProject
+            });
+        }
+    }
+
+    return { profile, event: doc };
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTHENTICATION MIDDLEWARE (Admin only)
@@ -433,6 +701,103 @@ app.get('/api/news', async (req, res) => {
     }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. INTENT TRACKING API (first-party)
+// ═══════════════════════════════════════════════════════════════════════════
+app.post('/api/intent/event', async (req, res) => {
+    try {
+        const visitorId = getVisitorIdFromReq(req);
+        const { eventType, page, section, developer, project, meta } = req.body || {};
+        if (!visitorId || !eventType) {
+            return res.status(400).json({ error: 'Missing visitorId or eventType' });
+        }
+
+        const result = await recordIntentEvent(req, {
+            visitorId,
+            eventType,
+            page,
+            section,
+            developer,
+            project,
+            meta
+        });
+
+        res.json({ ok: true, visitorId, score: result?.profile?.score ?? null, hot: result?.profile?.hot ?? false });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: 'Intent event failed', message: err.message });
+    }
+});
+
+app.get('/api/intent/profile', async (req, res) => {
+    try {
+        const visitorId = safeId(req.query.visitorId || '');
+        if (!visitorId) return res.status(400).json({ error: 'Missing visitorId' });
+
+        const database = await getDatabaseOrNull();
+        if (!database) {
+            return res.json(intentMemory.profiles.get(visitorId) || null);
+        }
+
+        const profile = await database.collection('intent_profiles').findOne({ visitorId });
+        res.json(profile || null);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to read profile', message: err.message });
+    }
+});
+
+// Simple conversational endpoint (optional AI, safe fallback)
+app.post('/api/chat', async (req, res) => {
+    try {
+        const visitorId = getVisitorIdFromReq(req) || 'anonymous';
+        const message = String(req.body?.message || '').trim();
+        if (!message) return res.status(400).json({ error: 'Missing message' });
+
+        // Track chat signal (no PII stored unless user types it)
+        if (visitorId !== 'anonymous') {
+            await recordIntentEvent(req, {
+                visitorId,
+                eventType: 'chat_message',
+                page: String(req.body?.page || ''),
+                meta: { length: message.length }
+            });
+        }
+
+        // Fallback responder (no external calls)
+        let reply = `Tell me what you want to invest in (developer: TMG / Emaar Misr / Palm Hills / Mountain View) and your budget range, and I’ll recommend 2–3 matching opportunities.`;
+
+        if (OPENAI_API_KEY) {
+            const prompt = [
+                { role: 'system', content: 'You are a helpful real-estate assistant for the GoldenBoarding Egypt dashboard. Keep replies short, specific, and ask 1 clarifying question if needed.' },
+                { role: 'user', content: message }
+            ];
+
+            const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${OPENAI_API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+                    messages: prompt,
+                    temperature: 0.4,
+                    max_tokens: 220
+                })
+            });
+
+            if (aiResp.ok) {
+                const data = await aiResp.json();
+                const text = data?.choices?.[0]?.message?.content?.trim();
+                if (text) reply = text;
+            }
+        }
+
+        res.json({ reply });
+    } catch (err) {
+        res.status(500).json({ error: 'Chat failed', message: err.message });
+    }
+});
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 5. BOOKINGS & ADMIN
@@ -441,7 +806,7 @@ app.get('/api/news', async (req, res) => {
 // Save a new booking
 app.post('/api/bookings', async (req, res) => {
     console.log('[BOOKING REQUEST]', req.body);
-    const { name, email, phone, date, project, developer, type } = req.body;
+    const { name, email, phone, date, project, developer, type, visitorId } = req.body;
 
     if (!name || !email || !phone || !project) {
         console.warn('[BOOKING VALIDATION FAILED] Missing fields:', { name, email, phone, project });
@@ -457,11 +822,36 @@ app.post('/api/bookings', async (req, res) => {
 
         const result = await database.collection('bookings').insertOne({
             name, email, phone, date, project, developer, type,
+            visitorId: safeId(visitorId || ''),
             timestamp: new Date().toISOString(),
             created_at: new Date()
         });
 
         console.log('[BOOKING SUCCESS] ID:', result.insertedId);
+        // Boost intent score when a booking is submitted (if visitorId exists)
+        if (visitorId) {
+            try {
+                const intentResult = await recordIntentEvent(req, {
+                    visitorId,
+                    eventType: 'booking_submit',
+                    page: '/index.html',
+                    developer,
+                    project,
+                    meta: { type }
+                });
+                sendAlert('booking_created', {
+                    bookingId: String(result.insertedId),
+                    visitorId: safeId(visitorId || ''),
+                    developer,
+                    project,
+                    type,
+                    name,
+                    email,
+                    phone,
+                    score: intentResult?.profile?.score ?? null
+                });
+            } catch (e) { /* non-fatal */ }
+        }
         res.status(201).json({ message: 'Booking successful', id: result.insertedId });
     } catch (err) {
         console.error('[BOOKING ERROR]', err.message);
@@ -522,6 +912,185 @@ app.get('/api/admin/export', isAdmin, async (req, res) => {
         res.send(csvContent);
     } catch (err) {
         res.status(500).json({ error: 'Export failed', message: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADMIN: INTENT (Hot visitors + event trail + AI drafts)
+// ═══════════════════════════════════════════════════════════════════════════
+app.get('/api/admin/intent/hot', isAdmin, async (req, res) => {
+    try {
+        const limit = clamp(parseInt(req.query.limit || '100', 10), 1, 500);
+        const database = await getDatabaseOrNull();
+
+        if (!database) {
+            const rows = Array.from(intentMemory.profiles.values())
+                .sort((a, b) => (b.score || 0) - (a.score || 0))
+                .slice(0, limit);
+            return res.json(rows);
+        }
+
+        const rows = await database.collection('intent_profiles')
+            .find({})
+            .sort({ score: -1, lastSeen: -1 })
+            .limit(limit)
+            .toArray();
+
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to read hot intent', message: err.message });
+    }
+});
+
+app.get('/api/admin/intent/events/:visitorId', isAdmin, async (req, res) => {
+    try {
+        const visitorId = safeId(req.params.visitorId || '');
+        if (!visitorId) return res.status(400).json({ error: 'Missing visitorId' });
+
+        const limit = clamp(parseInt(req.query.limit || '50', 10), 1, 200);
+        const database = await getDatabaseOrNull();
+
+        if (!database) {
+            const events = intentMemory.events
+                .filter(e => e.visitorId === visitorId)
+                .slice(-limit)
+                .reverse();
+            return res.json(events);
+        }
+
+        const events = await database.collection('intent_events')
+            .find({ visitorId })
+            .sort({ created_at: -1 })
+            .limit(limit)
+            .toArray();
+
+        res.json(events);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to read intent events', message: err.message });
+    }
+});
+
+app.get('/api/admin/alerts', isAdmin, async (req, res) => {
+    try {
+        const limit = clamp(parseInt(req.query.limit || '100', 10), 1, 500);
+        const database = await getDatabaseOrNull();
+
+        if (!database) {
+            const latest = intentMemory.alerts.slice(-limit).reverse();
+            return res.json(latest);
+        }
+
+        const alerts = await database.collection('alerts')
+            .find({})
+            .sort({ created_at: -1 })
+            .limit(limit)
+            .toArray();
+
+        res.json(alerts);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to read alerts', message: err.message });
+    }
+});
+
+function draftOutreachFallback({ channel, profile, booking }) {
+    const dev = booking?.developer || profile?.lastDeveloper || 'a top developer';
+    const proj = booking?.project || profile?.lastProject || 'a premium opportunity';
+    const name = booking?.name && !String(booking.name).toLowerCase().includes('anonymous') ? booking.name : 'there';
+    const goal = 'book a quick call';
+
+    if (channel === 'linkedin') {
+        return {
+            subject: null,
+            body: `Hi ${name} — saw you exploring ${dev} / ${proj}. If helpful, I can share the latest availability, payment plans, and the best-value unit types. Open to a 10‑minute call today or tomorrow?`
+        };
+    }
+
+    return {
+        subject: `Quick question about ${dev} / ${proj}`,
+        body: `Hi ${name},\n\nI noticed interest in ${dev} and the ${proj} opportunity. If you share your target budget and unit type (villa / apartment / coastal), I can shortlist 2–3 best matches and send the brochure + payment plans.\n\nWould you like a quick 10‑minute call today or tomorrow?\n\nRegards,\nGoldenBoarding Team`
+    };
+}
+
+app.post('/api/admin/ai/draft', isAdmin, async (req, res) => {
+    try {
+        const visitorId = safeId(req.body?.visitorId || '');
+        const channel = String(req.body?.channel || 'email').toLowerCase();
+        if (!visitorId) return res.status(400).json({ error: 'Missing visitorId' });
+
+        const database = await getDatabaseOrNull();
+        let profile = null;
+        let booking = null;
+
+        if (!database) {
+            profile = intentMemory.profiles.get(visitorId) || null;
+        } else {
+            profile = await database.collection('intent_profiles').findOne({ visitorId });
+            booking = await database.collection('bookings').findOne({ visitorId }, { sort: { created_at: -1 } });
+        }
+
+        const fallback = draftOutreachFallback({ channel, profile, booking });
+        if (!OPENAI_API_KEY) return res.json({ ...fallback, usedAI: false });
+
+        const context = {
+            visitorId,
+            score: profile?.score || 0,
+            lastSeen: profile?.lastSeen,
+            lastDeveloper: profile?.lastDeveloper,
+            lastProject: profile?.lastProject,
+            interestTags: profile?.interestTags || [],
+            booking: booking ? {
+                name: booking.name,
+                email: booking.email,
+                phone: booking.phone,
+                developer: booking.developer,
+                project: booking.project,
+                type: booking.type,
+                date: booking.date
+            } : null
+        };
+
+        const messages = [
+            {
+                role: 'system',
+                content: 'You are an AI SDR for a real-estate investment dashboard in Egypt. Write short, hyper-personalized outreach. No hype. One clear CTA to book a call. Return JSON with keys: subject (string|null), body (string).'
+            },
+            {
+                role: 'user',
+                content: `Channel: ${channel}\nContext:\n${JSON.stringify(context, null, 2)}`
+            }
+        ];
+
+        const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENAI_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+                messages,
+                temperature: 0.35,
+                max_tokens: 260
+            })
+        });
+
+        if (!aiResp.ok) {
+            return res.json({ ...fallback, usedAI: false, aiError: `status_${aiResp.status}` });
+        }
+
+        const data = await aiResp.json();
+        const raw = data?.choices?.[0]?.message?.content?.trim() || '';
+
+        // Try parse JSON; fallback to plain body
+        let parsed = null;
+        try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
+
+        const subject = parsed?.subject ?? fallback.subject;
+        const body = parsed?.body ?? raw ?? fallback.body;
+
+        res.json({ subject, body, usedAI: true });
+    } catch (err) {
+        res.status(500).json({ error: 'AI draft failed', message: err.message });
     }
 });
 
@@ -624,9 +1193,9 @@ app.get('/api/health', async (req, res) => {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// START SERVER (Conditional for Vercel)
+// START SERVER
 // ═══════════════════════════════════════════════════════════════════════════
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`\n🏠 Golden Boarding Dashboard Server`);
         console.log(`   ➜ Dashboard:  http://localhost:${PORT}`);

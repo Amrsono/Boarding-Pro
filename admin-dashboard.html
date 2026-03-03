@@ -139,6 +139,63 @@
         </div>
     </main>
 
+    <main class="dashboard-card glass-panel reveal-up" style="margin-top: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>Hot <span class="gold-text">Intent</span></h3>
+            <span id="intent-count" class="subtitle">0 Visitors</span>
+        </div>
+
+        <div class="leads-table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Last Seen</th>
+                        <th>Visitor</th>
+                        <th>Score</th>
+                        <th>Last Interest</th>
+                        <th>Signals</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="intent-body">
+                    <!-- Dynamic -->
+                </tbody>
+            </table>
+            <div id="no-intent" class="empty-state" style="display: none;">
+                No intent signals yet.
+            </div>
+        </div>
+    </main>
+
+    <!-- Intent Detail Modal -->
+    <div class="modal-overlay" id="intent-modal">
+        <div class="modal-content glass-panel" style="max-width: 900px;">
+            <button class="modal-close" id="intent-close">&times;</button>
+            <div style="padding: 1.5rem 1.5rem 0 1.5rem;">
+                <h3 style="margin:0;">Intent <span class="gold-text">Details</span></h3>
+                <p class="subtitle" id="intent-modal-sub" style="margin:0.4rem 0 0 0;"></p>
+            </div>
+
+            <div style="padding: 1.5rem;">
+                <div style="display:flex; gap: 0.75rem; flex-wrap: wrap; align-items:center; margin-bottom: 1rem;">
+                    <button class="cta-button-outline" id="btn-draft-email" style="padding:0.6rem 1rem;">Draft Email</button>
+                    <button class="cta-button-outline" id="btn-draft-linkedin" style="padding:0.6rem 1rem;">Draft LinkedIn</button>
+                    <span class="subtitle" id="draft-status" style="margin-left:auto;"></span>
+                </div>
+
+                <div class="glass-panel" style="padding: 1rem; margin-bottom: 1rem;">
+                    <div class="subtitle" style="margin-bottom: 0.4rem;">AI Draft</div>
+                    <div id="draft-output" style="white-space: pre-wrap; line-height: 1.45; color: var(--text-main);"></div>
+                </div>
+
+                <div class="glass-panel" style="padding: 1rem;">
+                    <div class="subtitle" style="margin-bottom: 0.6rem;">Recent Signals</div>
+                    <div id="intent-events" style="display:flex; flex-direction:column; gap: 0.5rem;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         const token = localStorage.getItem('admin_token');
         if (!token) window.location.href = 'admin-login.html';
@@ -194,6 +251,153 @@
             `).join('');
         }
 
+        let currentVisitorId = null;
+
+        async function fetchIntent() {
+            try {
+                const resp = await fetch('api/admin/intent/hot?limit=100', {
+                    headers: { 'Authorization': token }
+                });
+
+                if (resp.status === 401) {
+                    localStorage.removeItem('admin_token');
+                    window.location.href = 'admin-login.html';
+                    return;
+                }
+
+                const visitors = await resp.json();
+                renderIntent(visitors || []);
+            } catch (err) {
+                console.error('Intent fetch error:', err);
+            }
+        }
+
+        function fmtAgo(iso) {
+            if (!iso) return '—';
+            const t = new Date(iso).getTime();
+            if (!Number.isFinite(t)) return '—';
+            const diff = Date.now() - t;
+            const mins = Math.floor(diff / 60000);
+            if (mins < 1) return 'just now';
+            if (mins < 60) return `${mins}m ago`;
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return `${hrs}h ago`;
+            const days = Math.floor(hrs / 24);
+            return `${days}d ago`;
+        }
+
+        function renderIntent(visitors) {
+            const body = document.getElementById('intent-body');
+            const count = document.getElementById('intent-count');
+            const empty = document.getElementById('no-intent');
+
+            count.textContent = `${visitors.length} Visitors`;
+
+            if (!visitors.length) {
+                empty.style.display = 'block';
+                body.innerHTML = '';
+                return;
+            }
+            empty.style.display = 'none';
+
+            body.innerHTML = visitors.map(v => {
+                const last = v.lastProject || v.lastDeveloper || v.lastPage || '—';
+                const sig = v.eventCounts ? Object.entries(v.eventCounts).map(([k, val]) => `${k}:${val}`).slice(0, 3).join(' · ') : '—';
+                return `
+                    <tr>
+                        <td>${fmtAgo(v.lastSeen)}</td>
+                        <td style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">
+                            ${String(v.visitorId || '').slice(0, 10)}…
+                        </td>
+                        <td style="font-weight:700; color: var(--gold);">${v.score ?? 0}</td>
+                        <td>${last}</td>
+                        <td style="color: var(--text-muted); font-size: 0.85rem;">${sig}</td>
+                        <td>
+                            <button class="cta-button-outline btn-view-intent" data-vid="${v.visitorId}" style="padding: 0.45rem 0.8rem;">View</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            document.querySelectorAll('.btn-view-intent').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const vid = e.currentTarget.getAttribute('data-vid');
+                    if (!vid) return;
+                    await openIntentModal(vid);
+                });
+            });
+        }
+
+        async function openIntentModal(visitorId) {
+            currentVisitorId = visitorId;
+            const modal = document.getElementById('intent-modal');
+            const sub = document.getElementById('intent-modal-sub');
+            const eventsWrap = document.getElementById('intent-events');
+            const draftOut = document.getElementById('draft-output');
+            const status = document.getElementById('draft-status');
+
+            sub.textContent = `Visitor: ${String(visitorId).slice(0, 14)}…`;
+            eventsWrap.innerHTML = `<div class="subtitle">Loading…</div>`;
+            draftOut.textContent = '';
+            status.textContent = '';
+
+            modal.classList.add('active');
+
+            try {
+                const resp = await fetch(`api/admin/intent/events/${visitorId}?limit=50`, {
+                    headers: { 'Authorization': token }
+                });
+                const events = await resp.json();
+                eventsWrap.innerHTML = (events || []).map(ev => `
+                    <div style="display:flex; justify-content:space-between; gap: 0.75rem;">
+                        <div>
+                            <div style="font-weight:700;">${ev.eventType}</div>
+                            <div style="color: var(--text-muted); font-size: 0.85rem;">
+                                ${(ev.developer || ev.project || ev.section || ev.page || '').toString().slice(0, 140)}
+                            </div>
+                        </div>
+                        <div style="color: var(--text-muted); font-size: 0.8rem; white-space:nowrap;">${fmtAgo(ev.timestamp)}</div>
+                    </div>
+                `).join('') || `<div class="subtitle">No events found.</div>`;
+            } catch (err) {
+                eventsWrap.innerHTML = `<div class="subtitle">Failed to load events.</div>`;
+            }
+
+            async function draft(channel) {
+                status.textContent = 'Drafting…';
+                draftOut.textContent = '';
+                try {
+                    const resp = await fetch('api/admin/ai/draft', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': token
+                        },
+                        body: JSON.stringify({ visitorId, channel })
+                    });
+                    const data = await resp.json();
+                    const subject = data.subject ? `Subject: ${data.subject}\n\n` : '';
+                    draftOut.textContent = `${subject}${data.body || ''}`;
+                    status.textContent = data.usedAI ? 'AI used' : 'Template used';
+                } catch (e) {
+                    status.textContent = 'Draft failed';
+                }
+            }
+
+            document.getElementById('btn-draft-email').onclick = () => draft('email');
+            document.getElementById('btn-draft-linkedin').onclick = () => draft('linkedin');
+        }
+
+        function closeIntentModal() {
+            document.getElementById('intent-modal').classList.remove('active');
+            currentVisitorId = null;
+        }
+
+        document.getElementById('intent-close').addEventListener('click', closeIntentModal);
+        document.getElementById('intent-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'intent-modal') closeIntentModal();
+        });
+
         document.getElementById('btn-logout').addEventListener('click', () => {
             localStorage.removeItem('admin_token');
             window.location.href = 'admin-login.html';
@@ -245,6 +449,7 @@
         });
 
         fetchLeads();
+        fetchIntent();
     </script>
 </body>
 
