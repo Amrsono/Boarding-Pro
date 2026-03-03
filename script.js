@@ -317,18 +317,19 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem('gb_interest_proj', opp.title || '');
         } catch (e) { /* ignore */ }
 
-        track('modal_open', { developer: opp.developer, project: opp.title, section: 'featured' });
+        const section = opp.kind === 'insight' ? 'insights' : 'featured';
+        track('modal_open', { developer: opp.developer, project: opp.title, section });
 
         document.getElementById('modal-image').src = opp.image;
         document.getElementById('modal-image').alt = opp.title;
         document.getElementById('modal-developer').textContent = opp.developer;
         document.getElementById('modal-title').textContent = opp.title;
-        document.getElementById('modal-location').textContent = '📍 ' + opp.location;
-        document.getElementById('modal-description').textContent = opp.description;
+        document.getElementById('modal-location').textContent = opp.location ? '📍 ' + opp.location : '';
+        document.getElementById('modal-description').textContent = opp.description || '';
 
         // Specs
         const specsEl = document.getElementById('modal-specs');
-        specsEl.innerHTML = Object.entries(opp.specs).map(([key, val]) => {
+        specsEl.innerHTML = Object.entries(opp.specs || {}).map(([key, val]) => {
             const labels = { type: 'Type', area: 'Total Area', priceRange: 'Price Range', delivery: 'Delivery' };
             return `<div class="spec-item">
                 <span class="spec-value">${val}</span>
@@ -338,7 +339,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Highlights
         const highlightsEl = document.getElementById('modal-highlights');
-        highlightsEl.innerHTML = opp.highlights
+        highlightsEl.innerHTML = (opp.highlights || [])
             .map(h => `<span class="modal-highlight-tag">✓ ${h}</span>`)
             .join('');
 
@@ -455,6 +456,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.addEventListener('gb_insight_close', onClose);
 
         openModal({
+            kind: 'insight',
             developer: 'Insights',
             title: item.title,
             location: '',
@@ -499,6 +501,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnBrochure.addEventListener('click', () => {
         if (!currentOpp) return;
+        // If this is an insight, treat as a soft CTA, not external brochure
+        if (currentOpp.kind === 'insight') {
+            track('content_cta', { section: 'insights', contentId: currentOpp.title });
+            document.getElementById('booking-project-name').textContent = `Advisory Call — ${currentOpp.title}`;
+            bookingModal.classList.add('active');
+            bookingForm.style.display = 'flex';
+            bookingSuccess.style.display = 'none';
+            return;
+        }
+
         const link = brochureLinks[currentOpp.developer] || '#';
         window.open(link, '_blank');
 
@@ -508,8 +520,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnSchedule.addEventListener('click', () => {
         if (!currentOpp) return;
-        track('schedule_open', { developer: currentOpp.developer, project: currentOpp.title, section: 'modal' });
-        document.getElementById('booking-project-name').textContent = `${currentOpp.developer} - ${currentOpp.title}`;
+        const section = currentOpp.kind === 'insight' ? 'insights' : 'modal';
+        track('schedule_open', { developer: currentOpp.developer, project: currentOpp.title, section });
+        document.getElementById('booking-project-name').textContent =
+            currentOpp.kind === 'insight'
+                ? `Advisory Call — ${currentOpp.title}`
+                : `${currentOpp.developer} - ${currentOpp.title}`;
         bookingModal.classList.add('active');
         bookingForm.style.display = 'flex';
         bookingSuccess.style.display = 'none';

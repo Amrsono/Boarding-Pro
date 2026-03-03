@@ -59,7 +59,8 @@ const INTENT_EVENT_POINTS = {
     time_on_page: 1,
     content_view: 4,
     content_depth: 6,
-    content_dwell: 0
+    content_dwell: 0,
+    content_cta: 8
 };
 
 const INTENT_HOT_THRESHOLD = parseInt(process.env.INTENT_HOT_THRESHOLD || '35', 10);
