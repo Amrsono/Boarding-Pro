@@ -775,8 +775,12 @@ app.post('/api/chat', async (req, res) => {
             });
         }
 
+        if (!OPENAI_API_KEY) {
+            console.warn('⚠️ OPENAI_API_KEY missing. Chat assistant is running in fallback mode.');
+        }
+
         // Fallback responder (no external calls)
-        let reply = `Tell me what you want to invest in (developer: TMG / Emaar Misr / Palm Hills / Mountain View) and your budget range, and I’ll recommend 2–3 matching opportunities.`;
+        let reply = `I'm currently in "Safety Mode" (AI offline). Tell me what you're looking for (e.g., North Coast villas, New Capital offices, or TMG projects) and I'll help you navigate.`;
 
         if (OPENAI_API_KEY) {
             const prompt = [
@@ -784,24 +788,47 @@ app.post('/api/chat', async (req, res) => {
                 { role: 'user', content: message }
             ];
 
-            const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${OPENAI_API_KEY}`
-                },
-                body: JSON.stringify({
-                    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-                    messages: prompt,
-                    temperature: 0.4,
-                    max_tokens: 220
-                })
-            });
+            try {
+                const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${OPENAI_API_KEY}`
+                    },
+                    body: JSON.stringify({
+                        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+                        messages: prompt,
+                        temperature: 0.4,
+                        max_tokens: 220
+                    })
+                });
 
-            if (aiResp.ok) {
-                const data = await aiResp.json();
-                const text = data?.choices?.[0]?.message?.content?.trim();
-                if (text) reply = text;
+                if (aiResp.ok) {
+                    const data = await aiResp.json();
+                    const text = data?.choices?.[0]?.message?.content?.trim();
+                    if (text) reply = text;
+                } else {
+                    const errorData = await aiResp.json().catch(() => ({}));
+                    console.error('[OPENAI ERROR]', JSON.stringify(errorData));
+
+                    if (aiResp.status === 429 || errorData?.error?.code === 'insufficient_quota') {
+                        reply = "I'm currently in Safety Mode because my AI quota has been exceeded. You can still ask me about prices, TMG, or booking info, or check back once the limit is reset.";
+                    }
+                }
+            } catch (e) {
+                console.error('[CHAT ERROR]', e.message);
+            }
+        } else {
+            // Contextual Fallbacks
+            const low = message.toLowerCase();
+            if (low.includes('price') || low.includes('cost') || low.includes('budget')) {
+                reply = "Prices vary significantly by area. Most new launches start around EGP 3-5M for apartments, while North Coast villas can range from EGP 15M to 100M+. Which developer or area should I check specific price ranges for?";
+            } else if (low.includes('tmg') || low.includes('moustafa') || low.includes('southmed')) {
+                reply = "TMG is one of Egypt's largest developers. Their flagship coastal project is SouthMED (North Coast), and they also have Noor City and Madinaty. Are you interested in coastal resorts or smart urban living?";
+            } else if (low.includes('contact') || low.includes('book') || low.includes('call')) {
+                reply = "The best way to get details is to click 'View Details' on any project card and use the 'Confirm Appointment' or 'Request Brochure' buttons. Would you like me to point you to a specific developer's project?";
+            } else if (low.includes('north coast') || low.includes('sahel')) {
+                reply = "The North Coast (Sahel) is currently the hottest investment zone, especially around Ras El Hekma. We feature SouthMED (TMG), Hacienda Waters (Palm Hills), and LVLS (Mountain View). Which of these peaks your interest?";
             }
         }
 
